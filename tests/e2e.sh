@@ -265,7 +265,7 @@ s=$(screen)
 contains "$s" "Port the shader graph to WGSL" "picker: OpenCode row"
 contains "$s" "now cap retries at five" "picker: Codex row"
 contains "$s" "Removed the duplicate redirect" "picker: preview shows messages"
-contains "$s" "enter resume" "picker: header"
+contains "$s" "? keys · ctrl-g grep" "picker: header"
 
 press Down
 see "Bloom pass ported" "picker: the preview follows the cursor"
