@@ -122,6 +122,13 @@ equals "$only" codex "list --source codex"
 grep_ids() { "$bin" list --color=never --grep "$1" | cut -f1 | tr '\n' ' '; }
 equals "$(grep_ids 'duplicate redirect')" "$CLAUDE_ID " "grep: Claude message text"
 equals "$(grep_ids backoff)" "$CODEX_A " "grep: Codex message text"
+codex_row=$(printf '%s\n' "$rows" | awk -F '\t' -v id="$CODEX_A" '$1 == id')
+equals "$("$bin" list --color=never --grep backoff)" "$codex_row" \
+  "grep: an older Codex rollout match keeps the newest session row"
+equals "$("$bin" list --color=never --grep 'add retry')" "$codex_row" \
+  "grep: matching both Codex rollouts still returns one newest row"
+equals "$("$bin" list --color=never --grep 'Capped at 5')" "$codex_row" \
+  "grep: a newest Codex rollout match keeps the newest session row"
 equals "$(grep_ids 'explicit LOD')" "$OC_ID " "grep: OpenCode message text"
 equals "$(grep_ids 'no such text anywhere')" "" "grep: no match, no rows"
 
@@ -295,6 +302,7 @@ type_text "backoff"
 gone "login redirect" "picker: grep hides sessions without the text"
 see "now cap retries at five" "picker: grep keeps the session with the text"
 see "session : $CODEX_A" "picker: grep result is previewed"
+see "Capped at 5 retries" "picker: grep keeps the newest Codex preview"
 
 press C-u
 press C-f

@@ -5,6 +5,7 @@
 use crate::grep::{self, FileKind};
 use crate::session::{self, Session};
 use crate::{codex, opencode, util};
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -77,8 +78,15 @@ fn load_one(src: Src, query: Option<&str>, regex: bool) -> Result<Vec<Session>, 
             Ok(session::scan(&paths, query.is_none()))
         }
         Src::Codex => {
-            let paths = keep(codex::collect_paths(), FileKind::Codex)?;
-            Ok(codex::scan(&paths, query.is_none()))
+            let paths = codex::collect_paths();
+            let all = codex::scan(&paths, true);
+            let Some(q) = query else { return Ok(all) };
+            // Search every rollout, but keep the newest row and locator for
+            // each matching session, just as the unfiltered list does.
+            let allow = grep::filter(&paths, q, regex, FileKind::Codex)?;
+            let matching: Vec<PathBuf> = paths.into_iter().filter(|p| allow.contains(p)).collect();
+            let ids: HashSet<String> = codex::scan(&matching, false).into_iter().map(|s| s.id).collect();
+            Ok(all.into_iter().filter(|s| ids.contains(&s.id)).collect())
         }
         Src::OpenCode => {
             let all = opencode::scan()?;
