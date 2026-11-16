@@ -274,15 +274,16 @@ contains "$s" "now cap retries at five" "picker: Codex row"
 contains "$s" "Removed the duplicate redirect" "picker: preview shows messages"
 contains "$s" "? keys · ctrl-g grep" "picker: header"
 
-press Down
-see "Bloom pass ported" "picker: the preview follows the cursor"
+# The list is drawn bottom-up, newest at the bottom: Up goes to the next row.
 press Up
+see "Bloom pass ported" "picker: the preview follows the cursor"
+press Down
 see "Removed the duplicate redirect" "picker: and back"
 
 type_text "?"
 see "KEYS" "picker: ? shows the keys"
-press Down
 press Up
+press Down
 see "Removed the duplicate redirect" "picker: moving the cursor brings the preview back"
 
 press M-Left
