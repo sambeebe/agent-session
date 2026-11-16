@@ -22,5 +22,29 @@ jobs:
       # --locked: build exactly the dependency versions in Cargo.lock.
       - run: cargo build --locked --release
       - run: cargo test --locked --release
-      - run: ./target/release/agent-session --version
+
+      # The end-to-end test drives the real picker in a terminal, so it
+      # needs fzf and tmux. fzf is a pinned release, checked against its
+      # published SHA-256, because distro packages are older than the 0.58
+      # the picker needs.
+      - name: Install fzf and tmux (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q tmux
+          curl -fsSL -o fzf.tar.gz https://github.com/junegunn/fzf/releases/download/v0.75.0/fzf-0.75.0-linux_amd64.tar.gz
+          echo "0d6640f83582d991cf429754baad64b07e3a4e439a6019670f4b91da1314141c  fzf.tar.gz" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          tar -xzf fzf.tar.gz -C "$HOME/.local/bin" fzf
+          rm fzf.tar.gz
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Install fzf and tmux (macOS)
+        if: runner.os == 'macOS'
+        run: brew install fzf tmux
+
+      # Commands on all three systems; the picker itself on Linux and macOS.
+      - name: End-to-end test
         shell: bash
+        env:
+          E2E_REQUIRE_PICKER: ${{ runner.os != 'Windows' && '1' || '0' }}
+        run: tests/e2e.sh target/release/agent-session
