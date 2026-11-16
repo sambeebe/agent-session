@@ -1,0 +1,26 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+# The workflow only builds and tests: it needs to read the code, nothing else.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # --locked: build exactly the dependency versions in Cargo.lock.
+      - run: cargo build --locked --release
+      - run: cargo test --locked --release
+      - run: ./target/release/agent-session --version
+        shell: bash

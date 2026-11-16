@@ -1,0 +1,21 @@
+[package]
+name = "agent-session"
+version = "0.2.0"
+edition = "2021"
+description = "fzf picker for Claude Code, Codex and OpenCode sessions: fuzzy, folder and full-text grep modes, live preview, resume. A Rust port of sorafujitani/ccsession that runs natively on Windows."
+license = "MIT"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# OpenCode keeps its sessions in SQLite; "bundled" compiles SQLite itself
+# (with the MinGW gcc here), so nothing has to be installed for it.
+rusqlite = { version = "0.43", features = ["bundled"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
