@@ -57,7 +57,13 @@ At run time it needs `fzf` 0.58+ and whichever of `claude`, `codex`, `opencode` 
 
 ## Platforms
 
-Developed and tested on Windows 11. The macOS and Linux code paths exist, and CI builds and runs the unit tests on all three, but the picker has not been used by hand there. On those systems the original ccsession is the better choice.
+Developed on Windows 11. It also runs on Linux and macOS: CI builds it on all three and runs an end-to-end test, `tests/e2e.sh`. On Linux and macOS that test drives the real picker in a terminal with made-up session data: the list, the preview, grep and folder modes, the split and copy keys, and Enter resuming each tool in the session's own folder. It has had little everyday use on those two systems, where the original ccsession is the maintained choice.
+
+To run the test yourself (it needs `python3`, and `fzf` and `tmux` for the picker part):
+
+```
+cargo build --release && tests/e2e.sh
+```
 
 ## Security and privacy
 
