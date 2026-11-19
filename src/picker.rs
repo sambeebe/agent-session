@@ -116,7 +116,13 @@ pub fn split(delta: &str) -> Result<(), String> {
     if let Some(f) = ui_state_file() {
         let _ = util::write_atomic(&f, serde_json::json!({ "preview_pct": pct }).to_string().as_bytes());
     }
-    println!("change-preview-window({})", preview_window(pct));
+    // Two steps. While the preview is under the list, fzf (0.75) compares
+    // only the old and new under-the-list layouts, finds them equal, and
+    // skips the relayout, so a split widened past PREVIEW_MIN_COLS would
+    // stay under the list. Setting the plain side layout first makes the
+    // second change a different layout, which fzf lays out afresh,
+    // choosing side or under by the new width. fzf draws once, after both.
+    println!("change-preview-window(right,{pct}%,wrap)+change-preview-window({})", preview_window(pct));
     Ok(())
 }
 
