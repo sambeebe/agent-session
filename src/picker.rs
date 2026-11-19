@@ -117,12 +117,18 @@ pub fn split(delta: &str) -> Result<(), String> {
         let _ = util::write_atomic(&f, serde_json::json!({ "preview_pct": pct }).to_string().as_bytes());
     }
     // Two steps. While the preview is under the list, fzf (0.75) compares
-    // only the old and new under-the-list layouts, finds them equal, and
-    // skips the relayout, so a split widened past PREVIEW_MIN_COLS would
-    // stay under the list. Setting the plain side layout first makes the
-    // second change a different layout, which fzf lays out afresh,
-    // choosing side or under by the new width. fzf draws once, after both.
-    println!("change-preview-window(right,{pct}%,wrap)+change-preview-window({})", preview_window(pct));
+    // only the old and new under-the-list layouts when the threshold is
+    // unchanged, finds them equal, and skips the relayout, so a split
+    // widened past PREVIEW_MIN_COLS would stay under the list. (Leaving the
+    // threshold out does not help: change-preview-window inherits it from
+    // --preview-window.) So the first step uses a different threshold, 1,
+    // which makes each step a new layout that fzf lays out afresh; the
+    // second, the real one, picks side or under by the new width. fzf
+    // draws once, after both.
+    println!(
+        "change-preview-window(right,{pct}%,wrap,<1(down,{PREVIEW_DOWN_PCT}%,wrap))+change-preview-window({})",
+        preview_window(pct)
+    );
     Ok(())
 }
 
