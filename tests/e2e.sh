@@ -227,16 +227,19 @@ echo "      fzf $(fzf --version), $(tmux -V)"
 
 tm() { tmux -L "$sock" -f /dev/null "$@"; }
 screen() { tm capture-pane -p -t picker 2>/dev/null || true; }
-# open_picker [arguments]: the picker in a 240x40 terminal.
+# open_picker [arguments]: the picker in a terminal of $COLS x $ROWS,
+# 240 x 40 unless set.
 open_picker() {
   tm kill-server 2>/dev/null || true
   rm -f "$W/exit"
   reset_resumed
   # The sleep keeps the terminal up after the picker ends, so what it
   # printed on the way out can still be read.
-  tm new-session -d -s picker -x 240 -y 40 \
+  tm new-session -d -s picker -x "${COLS:-240}" -y "${ROWS:-40}" \
     "'$bin' $*; echo \$? > '$W/exit'; sleep 120"
 }
+# line_of <text>: the screen line it is first on, counting from 1.
+line_of() { screen | grep -n -F -m1 -- "$1" | cut -d: -f1; }
 press() { tm send-keys -t picker "$@"; }
 type_text() { tm send-keys -t picker -l "$1"; }
 # until_true <seconds> <command...>
@@ -353,6 +356,27 @@ see "login redirect" "picker: opens again"
 press Escape
 closed 0 "picker: esc quits"
 equals "$(resumed)" "" "picker: esc starts nothing"
+
+# A small terminal, as over SSH. At 96 columns a 60% side preview would
+# be under 60 columns wide, so it goes under the list; widened to 70% it
+# is wide enough to go back to the side.
+preview_below() { [ "$(line_of "session : $CLAUDE_ID")" -gt "$(line_of "Fix the login redirect")" ] 2>/dev/null; }
+preview_beside() { [ "$(line_of "session : $CLAUDE_ID")" -lt "$(line_of "Fix the login redirect")" ] 2>/dev/null; }
+COLS=96 ROWS=30 open_picker
+see "Fix the login redirect" "small terminal: opens"
+see "session : $CLAUDE_ID" "small terminal: shows the preview"
+until_true 15 preview_below || picker_failed "small terminal: the preview is under the list"
+ok "small terminal: the preview is under the list"
+lacks "$(screen)" "↳ ─" "small terminal: the rule under the header does not wrap"
+press M-Left
+until_true 15 preview_beside || picker_failed "small terminal: a wider split puts the preview back beside the list"
+ok "small terminal: a wider split puts the preview back beside the list"
+lacks "$(screen)" "↳ ─" "small terminal: the rule fits the side preview too"
+press M-Right
+until_true 15 preview_below || picker_failed "small terminal: narrowing it moves the preview under the list again"
+ok "small terminal: narrowing it moves the preview under the list again"
+press Escape
+closed 0 "small terminal: esc quits"
 
 echo
 echo "$checks checks passed"

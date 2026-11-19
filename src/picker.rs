@@ -96,8 +96,16 @@ fn preview_pct() -> u32 {
         .unwrap_or(SPLIT_DEFAULT)
 }
 
+/// Below this many columns a side preview is too cramped to read (a
+/// session id alone is 36), so it moves under the list at full width.
+const PREVIEW_MIN_COLS: u32 = 60;
+const PREVIEW_DOWN_PCT: u32 = 50;
+
+/// The preview on the right at `pct`% of the width; when that would be
+/// narrower than PREVIEW_MIN_COLS (a small terminal, an SSH window),
+/// below the list instead. fzf re-checks on every resize.
 fn preview_window(pct: u32) -> String {
-    format!("right,{pct}%,wrap")
+    format!("right,{pct}%,wrap,<{PREVIEW_MIN_COLS}(down,{PREVIEW_DOWN_PCT}%,wrap)")
 }
 
 /// `agent-session split <+N|-N>` (fzf's transform runs it): moves the split,

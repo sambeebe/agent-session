@@ -193,6 +193,16 @@ pub fn run(id: &str, opts: &Options) -> Result<(), String> {
     render(&s, &messages, started, total, opts).map_err(|e| e.to_string())
 }
 
+/// The rule under the header: 60 wide, or narrower in a preview pane that
+/// is (fzf says how wide in FZF_PREVIEW_COLUMNS), so it never wraps.
+fn rule_width() -> usize {
+    std::env::var("FZF_PREVIEW_COLUMNS")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .map(|cols| cols.saturating_sub(1).clamp(1, 60))
+        .unwrap_or(60)
+}
+
 fn render(s: &Session, messages: &[Message], started: i64, total: usize, opts: &Options) -> io::Result<()> {
     let c = |code: &'static str| if opts.color { code } else { "" };
     let (bold, reset, dim) = (c(BOLD), c(RESET), c(DIM));
@@ -220,7 +230,7 @@ fn render(s: &Session, messages: &[Message], started: i64, total: usize, opts: &
         let cmd = Src::of(s).resume_argv(&id).join(" ");
         writeln!(w, "{bold}resume{reset}  : {dim}cd \"{cwd}\" && {cmd}{reset}")?;
     }
-    writeln!(w, "{dim}{}{reset}", "─".repeat(60))?;
+    writeln!(w, "{dim}{}{reset}", "─".repeat(rule_width()))?;
 
     let re = opts
         .query
