@@ -359,9 +359,10 @@ equals "$(resumed)" "" "picker: esc starts nothing"
 
 # A small terminal, as over SSH. At 96 columns a 60% side preview would
 # be under 60 columns wide, so it goes under the list; widened to 70% it
-# is wide enough to go back to the side.
-preview_below() { [ "$(line_of "session : $CLAUDE_ID")" -gt "$(line_of "Fix the login redirect")" ] 2>/dev/null; }
-preview_beside() { [ "$(line_of "session : $CLAUDE_ID")" -lt "$(line_of "Fix the login redirect")" ] 2>/dev/null; }
+# is wide enough to go back to the side. The "6/6" count line marks where the
+# list is: at the side split its titles are cut off.
+preview_below() { [ "$(line_of "session : $CLAUDE_ID")" -gt "$(line_of "6/6")" ] 2>/dev/null; }
+preview_beside() { [ "$(line_of "session : $CLAUDE_ID")" -lt "$(line_of "6/6")" ] 2>/dev/null; }
 COLS=96 ROWS=30 open_picker
 see "Fix the login redirect" "small terminal: opens"
 see "session : $CLAUDE_ID" "small terminal: shows the preview"
