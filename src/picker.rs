@@ -198,6 +198,11 @@ pub fn fzf_args(exe: &str, keys: &Keys, srcs: &[Src]) -> Vec<String> {
     let reload = |cmd: &str| action("reload-sync", cmd);
     let transform = |cmd: &str| action("transform", cmd);
     args.extend([
+        // The whole terminal, whatever FZF_DEFAULT_OPTS says: a `--height
+        // 40%` there (common on Linux) would draw the picker inline in part
+        // of the screen, and `--tmux` would put it in a popup.
+        "--no-height".into(),
+        "--no-tmux".into(),
         "--ansi".into(),
         "--delimiter=\t".into(),
         // Shown: created, last message, harness, folder, name. Each is padded

@@ -420,6 +420,18 @@ press Escape
 closed 0 "picker: esc quits"
 equals "$(resumed)" "" "picker: esc starts nothing"
 
+# FZF_DEFAULT_OPTS can shrink fzf (--height) or move it into a tmux popup
+# (--tmux); the picker takes the whole terminal regardless.
+export FZF_DEFAULT_OPTS='--height=40% --tmux=center,50%'
+open_picker
+unset FZF_DEFAULT_OPTS
+see "session : $CLAUDE_ID" "FZF_DEFAULT_OPTS: the picker opens in this terminal, not a popup"
+bottom_of_screen() { [ "$(screen | grep -n '╰' | tail -1 | cut -d: -f1)" -ge 39 ] 2>/dev/null; }
+until_true 15 bottom_of_screen || picker_failed "FZF_DEFAULT_OPTS: --height does not shrink the picker"
+ok "FZF_DEFAULT_OPTS: --height does not shrink the picker"
+press Escape
+closed 0 "FZF_DEFAULT_OPTS: esc quits"
+
 # A small terminal, as over SSH: the same layout, nothing cut off.
 COLS=80 ROWS=24 open_picker
 see "Fix the login redirect" "small terminal: opens with the names readable"
