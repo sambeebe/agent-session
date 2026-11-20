@@ -51,7 +51,7 @@ export OPENCODE_DB="$W/opencode.db"
 export AGENT_SESSION_CACHE_DIR="$W/cache"
 unset AGENT_SESSION_EXCLUDE_DIR AGENT_SESSION_PREVIEW_MESSAGES XDG_DATA_HOME XDG_CACHE_HOME
 unset AGENT_SESSION_BIND_GREP AGENT_SESSION_BIND_DIR AGENT_SESSION_BIND_FUZZY
-unset AGENT_SESSION_BIND_COPY AGENT_SESSION_BIND_WIDEN AGENT_SESSION_BIND_NARROW
+unset AGENT_SESSION_BIND_COPY AGENT_SESSION_BIND_BIGGER AGENT_SESSION_BIND_SMALLER
 
 CLAUDE_ID=aaaaaaaa-1111-4222-8333-444455556666
 HOSTILE_ID=11111111-2222-4333-8444-555555555555
@@ -119,6 +119,15 @@ equals "$n" 6 "list --json parses"
 only=$("$bin" list --color=never --source codex | cut -f3 | sort -u)
 equals "$only" codex "list --source codex"
 
+# Shown columns: created, last message, harness, folder, name; no id.
+fields=$(printf '%s\n' "$rows" | awk -F '\t' '{ print NF }' | sort -u)
+equals "$fields" 8 "list: id, locator, source, then five shown columns"
+codex_times=$(printf '%s\n' "$rows" | awk -F '\t' -v id="$CODEX_A" '$1 == id { print $4 "|" $5 }' | tr -s ' ')
+equals "$codex_times" "5h ago |1h ago " "list: created (first rollout) and last message columns"
+lacks "$(printf '%s\n' "$rows" | cut -f4-)" "0199aaaa" "list: the session id is not shown"
+names=$("$bin" list --color=never --column-names | head -1 | tr -s ' ')
+equals "$names" "$(printf '\t\t\tcreated \tlast msg \tharness \tfolder \tname')" "list --column-names: a header row first"
+
 grep_ids() { "$bin" list --color=never --grep "$1" | cut -f1 | tr '\n' ' '; }
 equals "$(grep_ids 'duplicate redirect')" "$CLAUDE_ID " "grep: Claude message text"
 equals "$(grep_ids backoff)" "$CODEX_A " "grep: Codex message text"
@@ -139,6 +148,14 @@ contains "$out" "Removed the duplicate redirect" "preview: Claude messages"
 out=$("$bin" preview --color=never 0199aaaa)
 contains "$out" "Capped at 5 retries" "preview: Codex messages, by id prefix"
 lacks "$out" "secret rule" "preview: Codex's AGENTS.md turn is hidden"
+# The first and the last messages, and how many are left out between.
+out=$(AGENT_SESSION_PREVIEW_MESSAGES=1 "$bin" preview --color=never "$CODEX_A")
+contains "$out" "add retry to the uploader" "preview: the first message"
+contains "$out" "··· 1 more message ···" "preview: how many are left out"
+contains "$out" "Capped at 5 retries" "preview: the last message"
+lacks "$out" "now cap retries at five" "preview: the middle is left out"
+out=$("$bin" preview --color=never "$CODEX_A")
+lacks "$out" "more message" "preview: a short session is shown whole"
 out=$("$bin" preview --color=never "$OC_ID")
 contains "$out" "Bloom pass ported" "preview: OpenCode messages"
 out=$("$bin" preview --color=never "$HOSTILE_ID")
@@ -268,6 +285,10 @@ open_picker() {
 }
 # line_of <text>: the screen line it is first on, counting from 1.
 line_of() { screen | grep -n -F -m1 -- "$1" | cut -d: -f1; }
+# Where the preview is: its first line below the list's "6/6" count line.
+preview_below() { [ "$(line_of "session : $CLAUDE_ID")" -gt "$(line_of "6/6")" ] 2>/dev/null; }
+# How tall the preview is: the screen lines inside its box.
+preview_rows() { screen | grep -c '^│' || true; }
 press() { tm send-keys -t picker "$@"; }
 type_text() { tm send-keys -t picker -l "$1"; }
 # until_true <seconds> <command...>
@@ -304,6 +325,9 @@ contains "$s" "Port the shader graph to WGSL" "picker: OpenCode row"
 contains "$s" "now cap retries at five" "picker: Codex row"
 contains "$s" "Removed the duplicate redirect" "picker: preview shows messages"
 contains "$s" "? keys · ctrl-g grep" "picker: header"
+contains "$s" "last msg" "picker: column names"
+row=$(screen | grep -F "Fix the login redirect" | head -1)
+lacks "$row" "aaaaaaaa" "picker: the row has no session id"
 
 # The list is drawn bottom-up, newest at the bottom: Up goes to the next row.
 press Up
@@ -317,12 +341,23 @@ press Up
 press Down
 see "Removed the duplicate redirect" "picker: moving the cursor brings the preview back"
 
-press M-Left
-until_true 15 file_has "$W/cache/ui.json" '{"preview_pct":70}' || picker_failed "picker: alt-left widens the preview"
-ok "picker: alt-left widens the preview"
-press M-Right
-until_true 15 file_has "$W/cache/ui.json" '{"preview_pct":60}' || picker_failed "picker: alt-right narrows it"
-ok "picker: alt-right narrows it"
+until_true 15 preview_below || picker_failed "picker: the preview is under the list"
+ok "picker: the preview is under the list"
+rows_before=$(preview_rows)
+type_text ">"
+until_true 15 file_has "$W/cache/ui.json" '{"preview_height_pct":60}' || picker_failed "picker: > makes the preview bigger"
+until_true 15 test "$(preview_rows)" -gt "$rows_before" || picker_failed "picker: > makes the preview taller on screen"
+ok "picker: > makes the preview bigger"
+type_text "<"
+until_true 15 file_has "$W/cache/ui.json" '{"preview_height_pct":50}' || picker_failed "picker: < makes it smaller"
+until_true 15 test "$(preview_rows)" -eq "$rows_before" || picker_failed "picker: < makes it shorter on screen"
+ok "picker: < makes it smaller"
+# In a query, < and > are typed, and the split stays.
+type_text "zz<>"
+see "> zz<>" "picker: < and > are typed into a query"
+equals "$(cat "$W/cache/ui.json")" '{"preview_height_pct":50}' "picker: typing them leaves the split alone"
+press C-u
+see "login redirect" "picker: query cleared"
 
 press C-y
 until_true 15 file_has "$W/clip" "$CLAUDE_ID" || picker_failed "picker: ctrl-y copies the session id"
@@ -385,25 +420,13 @@ press Escape
 closed 0 "picker: esc quits"
 equals "$(resumed)" "" "picker: esc starts nothing"
 
-# A small terminal, as over SSH. At 96 columns a 60% side preview would
-# be under 60 columns wide, so it goes under the list; widened to 70% it
-# is wide enough to go back to the side. The "6/6" count line marks where the
-# list is: at the side split its titles are cut off.
-preview_below() { [ "$(line_of "session : $CLAUDE_ID")" -gt "$(line_of "6/6")" ] 2>/dev/null; }
-preview_beside() { [ "$(line_of "session : $CLAUDE_ID")" -lt "$(line_of "6/6")" ] 2>/dev/null; }
-COLS=96 ROWS=30 open_picker
-see "Fix the login redirect" "small terminal: opens"
+# A small terminal, as over SSH: the same layout, nothing cut off.
+COLS=80 ROWS=24 open_picker
+see "Fix the login redirect" "small terminal: opens with the names readable"
 see "session : $CLAUDE_ID" "small terminal: shows the preview"
 until_true 15 preview_below || picker_failed "small terminal: the preview is under the list"
 ok "small terminal: the preview is under the list"
 lacks "$(screen)" "↳ ─" "small terminal: the rule under the header does not wrap"
-press M-Left
-until_true 15 preview_beside || picker_failed "small terminal: a wider split puts the preview back beside the list"
-ok "small terminal: a wider split puts the preview back beside the list"
-lacks "$(screen)" "↳ ─" "small terminal: the rule fits the side preview too"
-press M-Right
-until_true 15 preview_below || picker_failed "small terminal: narrowing it moves the preview under the list again"
-ok "small terminal: narrowing it moves the preview under the list again"
 press Escape
 closed 0 "small terminal: esc quits"
 

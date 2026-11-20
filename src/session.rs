@@ -24,6 +24,9 @@ pub struct Session {
     pub label: String,
     /// Last user/assistant timestamp (else the file's mtime), epoch ms.
     pub last_ms: i64,
+    /// When the session was started (its first message), epoch ms.
+    #[serde(default)]
+    pub created_ms: i64,
     #[serde(default)]
     pub cwd_exists: bool,
     /// No cwd recorded and the directory-name fallback did not exist:
@@ -258,6 +261,7 @@ pub fn parse_tail(path: &Path, max: u64) -> io::Result<Option<Session>> {
     let mut earliest_cwd = String::new();
     let mut matching_cwd = String::new();
     let mut last_ms = 0i64;
+    let mut first_ms = 0i64;
 
     let text = String::from_utf8_lossy(&buf);
     for line in text.lines().rev() {
@@ -292,6 +296,9 @@ pub fn parse_tail(path: &Path, max: u64) -> io::Result<Option<Session>> {
                 }
                 let ts = util::parse_ts_ms(e.timestamp.as_deref().unwrap_or(""));
                 last_ms = last_ms.max(ts);
+                if ts > 0 {
+                    first_ms = if first_ms == 0 { ts } else { first_ms.min(ts) };
+                }
             }
             _ => {}
         }
@@ -343,7 +350,34 @@ pub fn parse_tail(path: &Path, max: u64) -> io::Result<Option<Session>> {
         }
     }
     sess.last_ms = last_ms;
+    // When it was started: the first message near the top of the file, else
+    // the earliest one in the tail just read, else its last activity.
+    sess.created_ms = read_start_ms(path)
+        .or((first_ms > 0).then_some(first_ms))
+        .unwrap_or(last_ms);
     Ok(Some(sess))
+}
+
+/// The time of the first user or assistant row in the first 64 KiB.
+fn read_start_ms(path: &Path) -> Option<i64> {
+    let mut buf = Vec::new();
+    File::open(path).ok()?.take(64 * 1024).read_to_end(&mut buf).ok()?;
+    let text = String::from_utf8_lossy(&buf);
+    for line in text.lines() {
+        let line = line.trim();
+        if !line.contains("\"type\":\"user\"") && !line.contains("\"type\":\"assistant\"") {
+            continue;
+        }
+        let Ok(e) = serde_json::from_str::<Entry>(line) else { continue };
+        if !matches!(e.kind.as_deref(), Some("user" | "assistant")) {
+            continue;
+        }
+        let ms = util::parse_ts_ms(e.timestamp.as_deref().unwrap_or(""));
+        if ms > 0 {
+            return Some(ms);
+        }
+    }
+    None
 }
 
 /// `parse_tail` over a growing tail until it finds a session. A long session
@@ -369,7 +403,7 @@ pub fn parse_session(path: &Path, first: u64) -> io::Result<Option<Session>> {
 
 // ---------------------------------------------------------------- scanning with a cache
 
-const SCAN_CACHE_VERSION: u32 = 3;
+const SCAN_CACHE_VERSION: u32 = 4;
 
 #[derive(Serialize, Deserialize, Default)]
 struct ScanCache {

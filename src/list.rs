@@ -1,7 +1,8 @@
 //! `agent-session list`: one TSV row per session, the rows fzf shows.
 //!
-//! Columns: id, locator, source | age, harness, folder, short id, title.
-//! fzf shows the last five (`--with-nth=4..8`). Each shown column is padded
+//! Columns: id, locator, source | created, last message, harness, folder,
+//! name. fzf shows the last five (`--with-nth=4..8`); the id stays hidden
+//! (ctrl-y copies it, the preview shows it). Each shown column is padded
 //! to a fixed width and fzf draws a tab as one cell (`--tabstop=1`), so the
 //! columns line up whatever a folder name or an age's length.
 
@@ -18,6 +19,8 @@ pub struct Options {
     pub json: bool,
     pub limit: usize,
     pub color: bool,
+    /// Start with a row of column names (the picker's header line).
+    pub column_names: bool,
     /// Wait this long first: fzf kills a reload when the next keystroke
     /// starts another, so a short wait keeps typing from scanning per key.
     pub delay_ms: u64,
@@ -26,7 +29,6 @@ pub struct Options {
 const AGE_W: usize = 10;
 const HARNESS_W: usize = 8;
 const DIR_W: usize = 20;
-const ID_W: usize = 8;
 
 const FOLDER: &str = "\x1b[36m";
 
@@ -43,10 +45,13 @@ fn fit(text: &str, w: usize) -> String {
     util::pad_right(&util::truncate(text, w), w)
 }
 
-/// The first 8 characters that tell sessions apart (OpenCode ids all
-/// start with "ses_").
-pub fn short_id(s: &Session) -> String {
-    s.id.strip_prefix("ses_").unwrap_or(&s.id).chars().take(ID_W).collect()
+/// A row of column names, shaped like a session row (with empty id,
+/// locator and source) so fzf's `--header-lines=1` lines it up with them.
+pub fn column_names(color: bool) -> String {
+    let (dim, reset) = if color { (DIM, RESET) } else { ("", "") };
+    let names = [fit("created", AGE_W), fit("last msg", AGE_W), fit("harness", HARNESS_W), fit("folder", DIR_W), "name".into()];
+    let shown: Vec<String> = names.iter().map(|n| format!("{dim}{n}{reset}")).collect();
+    format!("\t\t\t{}", shown.join("\t"))
 }
 
 pub fn load(srcs: &[Src], grep: Option<&str>, regex: bool, exclude: Option<&str>) -> Result<Vec<Session>, String> {
@@ -59,13 +64,13 @@ pub fn load(srcs: &[Src], grep: Option<&str>, regex: bool, exclude: Option<&str>
 
 pub fn format_line(s: &Session, now: i64, color: bool) -> String {
     let src = Src::of(s);
-    let age = fit(&util::relative(s.last_ms, now), AGE_W);
+    let created = fit(&util::relative(s.created_ms, now), AGE_W);
+    let last = fit(&util::relative(s.last_ms, now), AGE_W);
     let harness = fit(src.name(), HARNESS_W);
     // A folder name comes out of the transcript: a tab in it would shift
     // the row's fields and an escape sequence would reach fzf's --ansi.
     let folder_name = util::printable(&s.cwd_basename);
     let dir = fit(if folder_name.trim().is_empty() { "(unknown)" } else { &folder_name }, DIR_W);
-    let short = fit(&short_id(s), ID_W);
     // [cwd?]: never knew the cwd. [gone]: the recorded cwd no longer exists.
     let marker = if s.cwd_unknown {
         "[cwd?] "
@@ -79,12 +84,12 @@ pub fn format_line(s: &Session, now: i64, color: bool) -> String {
         let folder = if healthy { FOLDER } else { YELLOW };
         let marker = if healthy { String::new() } else { format!("{YELLOW}{marker}{RESET}") };
         format!(
-            "{DIM}{age}{RESET}\t{}{harness}{RESET}\t{folder}{dir}{RESET}\t{DIM}{short}{RESET}\t{marker}{}",
+            "{DIM}{created}{RESET}\t{last}\t{}{harness}{RESET}\t{folder}{dir}{RESET}\t{marker}{}",
             harness_color(src),
             s.label
         )
     } else {
-        format!("{age}\t{harness}\t{dir}\t{short}\t{marker}{}", s.label)
+        format!("{created}\t{last}\t{harness}\t{dir}\t{marker}{}", s.label)
     };
     format!("{}\t{}\t{}\t{shown}", s.id, session::locator_for(s), src.name())
 }
@@ -111,6 +116,8 @@ pub fn run(opts: &Options) -> Result<(), String> {
                     "cwd": s.cwd,
                     "cwd_basename": s.cwd_basename,
                     "label": s.label,
+                    "created_epoch": s.created_ms / 1000,
+                    "created": util::rfc3339(s.created_ms),
                     "last_epoch": s.last_ms / 1000,
                     "last_activity": util::rfc3339(s.last_ms),
                     "cwd_exists": s.cwd_exists,
@@ -122,6 +129,9 @@ pub fn run(opts: &Options) -> Result<(), String> {
         let _ = writeln!(w);
     } else {
         let now = util::now_ms();
+        if opts.column_names && writeln!(w, "{}", column_names(opts.color)).is_err() {
+            return Ok(());
+        }
         for s in &sessions {
             if writeln!(w, "{}", format_line(s, now, opts.color)).is_err() {
                 break;

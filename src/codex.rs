@@ -150,6 +150,7 @@ fn id_from_path(path: &Path) -> String {
 pub fn parse_file(path: &Path) -> io::Result<Option<Session>> {
     let mut r = BufReader::with_capacity(256 << 10, File::open(path)?);
     let (mut id, mut cwd, mut label, mut last_ms) = (String::new(), String::new(), String::new(), 0i64);
+    let mut created_ms = 0i64;
     let mut buf = Vec::new();
     loop {
         let line = util::read_line_capped(&mut r, &mut buf, LINE_CAP)?;
@@ -161,7 +162,11 @@ pub fn parse_file(path: &Path) -> io::Result<Option<Session>> {
         }
         let Ok(s) = std::str::from_utf8(&buf) else { continue };
         let Some(l) = parse_line(s) else { continue };
-        last_ms = last_ms.max(util::parse_ts_ms(l.timestamp.as_deref().unwrap_or("")));
+        let ts = util::parse_ts_ms(l.timestamp.as_deref().unwrap_or(""));
+        last_ms = last_ms.max(ts);
+        if created_ms == 0 {
+            created_ms = ts;
+        }
         if l.kind.as_deref() == Some("session_meta") {
             if let Some(p) = &l.payload {
                 if let Some(v) = p.id.as_deref().filter(|v| !v.is_empty()) {
@@ -194,6 +199,7 @@ pub fn parse_file(path: &Path) -> io::Result<Option<Session>> {
         jsonl_path: path.to_string_lossy().to_string(),
         label,
         last_ms,
+        created_ms: if created_ms > 0 { created_ms } else { last_ms },
         ..Default::default()
     };
     if cwd.is_empty() {
@@ -207,11 +213,25 @@ pub fn parse_file(path: &Path) -> io::Result<Option<Session>> {
 }
 
 /// Every Codex session, newest first, one per id: a resumed session writes
-/// a new rollout with the same id, and the newest one is the live one.
+/// a new rollout with the same id, and the newest one is the live one. It
+/// was started when its oldest rollout was.
 pub fn scan(paths: &[PathBuf], is_full: bool) -> Vec<Session> {
     let all = session::scan_with(paths, is_full, SCAN_CACHE, parse_file);
+    let mut started: HashMap<String, i64> = HashMap::new();
+    for s in &all {
+        let first = started.entry(s.id.clone()).or_insert(s.created_ms);
+        if s.created_ms > 0 && (*first == 0 || s.created_ms < *first) {
+            *first = s.created_ms;
+        }
+    }
     let mut seen: HashMap<String, ()> = HashMap::new();
-    all.into_iter().filter(|s| seen.insert(s.id.clone(), ()).is_none()).collect()
+    all.into_iter()
+        .filter(|s| seen.insert(s.id.clone(), ()).is_none())
+        .map(|mut s| {
+            s.created_ms = started.get(&s.id).copied().unwrap_or(s.created_ms);
+            s
+        })
+        .collect()
 }
 
 pub fn find(id: &str, locator_path: Option<&Path>) -> Result<Session, String> {

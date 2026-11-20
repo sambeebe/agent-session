@@ -35,12 +35,13 @@ USAGE:
   not set up on this machine simply has no rows.
 
 PICKER KEYS (? or f1 in the picker shows them too):
-  typing      fuzzy-filter age / harness / folder / short id / title
+  typing      fuzzy-filter created / last message / harness / folder / name
   ctrl-g      grep mode: every keystroke searches all message text
   ctrl-o      folder mode     ctrl-f     back to fuzzy
-  alt-left    wider preview   alt-right  narrower preview (remembered)
+  <           smaller preview >          bigger preview (remembered)
+              (<, > and ? act on an empty query; otherwise they are typed)
   ctrl-y      copy the id     enter      resume
-  Rebind: --bind-* flags, or AGENT_SESSION_BIND_GREP / _DIR / _FUZZY / _COPY / _WIDEN / _NARROW.
+  Rebind: --bind-* flags, or AGENT_SESSION_BIND_GREP / _DIR / _FUZZY / _COPY / _BIGGER / _SMALLER.
 
 WHERE SESSIONS ARE READ FROM:
   claude    $CLAUDE_CONFIG_DIR/projects, default ~/.claude/projects
@@ -50,7 +51,7 @@ WHERE SESSIONS ARE READ FROM:
 
 ENVIRONMENT:
   AGENT_SESSION_EXCLUDE_DIR       same as --exclude-dir
-  AGENT_SESSION_PREVIEW_MESSAGES  messages in the preview (default 30)
+  AGENT_SESSION_PREVIEW_MESSAGES  messages the preview shows from each end of a session (default 6)
   AGENT_SESSION_CACHE_DIR         cache folder (default %LOCALAPPDATA%\\agent-session or ~/.cache/agent-session)
 
 REQUIRES: fzf 0.58+, and the harness you resume (claude / codex / opencode).
@@ -174,7 +175,11 @@ fn real_main() -> Result<i32, String> {
     let sub = &rest[1..];
     match cmd.as_str() {
         "list" => {
-            let a = parse(sub, &["grep", "exclude-dir", "limit", "color", "delay", "source"], &["regex", "json", "no-color"])?;
+            let a = parse(
+                sub,
+                &["grep", "exclude-dir", "limit", "color", "delay", "source"],
+                &["regex", "json", "no-color", "column-names"],
+            )?;
             list::run(&list::Options {
                 sources: sources::parse_filter(a.value("source").or(global.value("source")).as_deref())?,
                 grep: a.value("grep"),
@@ -183,6 +188,7 @@ fn real_main() -> Result<i32, String> {
                 json: a.flag("json"),
                 limit: a.value("limit").map(|v| v.parse().map_err(|_| "--limit must be a number >= 0")).transpose()?.unwrap_or(0),
                 color: color_on(&a),
+                column_names: a.flag("column-names"),
                 delay_ms: a.value("delay").and_then(|v| v.parse().ok()).unwrap_or(0),
             })?;
             Ok(0)
@@ -221,7 +227,7 @@ fn real_main() -> Result<i32, String> {
         }
         // Run by the picker's key bindings, not meant to be typed.
         "split" => {
-            picker::split(sub.first().map(String::as_str).unwrap_or("0"))?;
+            picker::split(sub.first().map(String::as_str).unwrap_or("0"), sub.get(1).map(String::as_str), &keys())?;
             Ok(0)
         }
         "help-or-type" => {

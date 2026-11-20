@@ -69,13 +69,22 @@ fn connect() -> Result<Option<Connection>, String> {
     }
 }
 
-fn session_of(id: String, title: Option<String>, dir: Option<String>, updated_ms: i64) -> Session {
+/// One `SELECT id, title, directory, time_updated, time_created` row.
+type Row = (String, Option<String>, Option<String>, i64, i64);
+
+fn row(r: &rusqlite::Row) -> rusqlite::Result<Row> {
+    let ms = |i: usize| r.get::<_, Option<i64>>(i).map(|v| v.unwrap_or(0));
+    Ok((r.get(0)?, r.get(1)?, r.get(2)?, ms(3)?, ms(4)?))
+}
+
+fn session_of((id, title, dir, updated_ms, created_ms): Row) -> Session {
     let dir = dir.unwrap_or_default();
     let mut s = Session {
         source: NAME.to_string(),
         label: util::sanitize_label(title.as_deref().unwrap_or("")),
         id,
         last_ms: updated_ms,
+        created_ms: if created_ms > 0 { created_ms } else { updated_ms },
         ..Default::default()
     };
     if s.label.is_empty() {
@@ -91,7 +100,7 @@ fn session_of(id: String, title: Option<String>, dir: Option<String>, updated_ms
     s
 }
 
-const SCAN: &str = "SELECT id, title, directory, time_updated FROM session \
+const SCAN: &str = "SELECT id, title, directory, time_updated, time_created FROM session \
                     WHERE parent_id IS NULL AND time_archived IS NULL \
                     ORDER BY time_updated DESC, id DESC";
 
@@ -100,26 +109,26 @@ pub fn scan() -> Result<Vec<Session>, String> {
     let Some(c) = connect()? else { return Ok(Vec::new()) };
     let mut st = c.prepare(SCAN).map_err(|e| format!("opencode: {e}"))?;
     let rows = st
-        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get(1)?, r.get(2)?, r.get::<_, Option<i64>>(3)?.unwrap_or(0))))
+        .query_map([], row)
         .map_err(|e| format!("opencode: {e}"))?;
     Ok(rows
         .flatten()
         .filter(|(id, ..)| !id.contains(['\t', '\n', '\r']))
-        .map(|(id, title, dir, ms)| session_of(id, title, dir, ms))
+        .map(session_of)
         .collect())
 }
 
 pub fn find(id: &str) -> Result<Session, String> {
     let c = connect()?.ok_or("no opencode database found")?;
     let mut st = c
-        .prepare("SELECT id, title, directory, time_updated FROM session WHERE id = ?1 OR id LIKE ?2 ESCAPE '\\' LIMIT 2")
+        .prepare("SELECT id, title, directory, time_updated, time_created FROM session WHERE id = ?1 OR id LIKE ?2 ESCAPE '\\' LIMIT 2")
         .map_err(|e| format!("opencode: {e}"))?;
     let prefix = format!("{}%", escape_like(id));
     let found: Vec<Session> = st
-        .query_map(params![id, prefix], |r| Ok((r.get::<_, String>(0)?, r.get(1)?, r.get(2)?, r.get::<_, Option<i64>>(3)?.unwrap_or(0))))
+        .query_map(params![id, prefix], row)
         .map_err(|e| format!("opencode: {e}"))?
         .flatten()
-        .map(|(id, t, d, ms)| session_of(id, t, d, ms))
+        .map(session_of)
         .collect();
     if let Some(exact) = found.iter().find(|s| s.id == id) {
         return Ok(exact.clone());
@@ -223,13 +232,17 @@ fn all_messages(c: &Connection, id: &str) -> Result<Vec<(String, i64, String)>, 
 }
 
 /// The last `limit` messages, the first message's time, and the count.
-pub fn messages(id: &str, limit: usize) -> Result<(Vec<(String, i64, String)>, i64, usize), String> {
+type Msgs = Vec<(String, i64, String)>;
+
+/// The first and last `limit` messages, the first one's time, the count.
+pub fn messages(id: &str, limit: usize) -> Result<(Msgs, Msgs, i64, usize), String> {
     let c = connect()?.ok_or("no opencode database found")?;
     let all = all_messages(&c, id)?;
     let started = all.first().map(|m| m.1).unwrap_or(0);
     let total = all.len();
+    let head = all.iter().take(limit).cloned().collect();
     let tail = all.into_iter().skip(total.saturating_sub(limit)).collect();
-    Ok((tail, started, total))
+    Ok((head, tail, started, total))
 }
 
 fn escape_like(s: &str) -> String {
@@ -322,9 +335,13 @@ mod tests {
         let ss = scan().unwrap();
         assert_eq!(ss.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["ses_aaa"]);
         assert_eq!(ss[0].label, "Refactor parser");
-        let (msgs, started, total) = messages("ses_aaa", 30).unwrap();
+        let (head, msgs, started, total) = messages("ses_aaa", 30).unwrap();
         assert_eq!((started, total), (10, 2));
         assert_eq!(msgs[1].2, "Done: Lexer is separate");
+        assert_eq!(head.len(), 2);
+        let (head, tail, _, _) = messages("ses_aaa", 1).unwrap();
+        assert_eq!((head[0].1, tail[0].2.as_str()), (10, "Done: Lexer is separate"));
+        assert!(ss[0].created_ms > 0);
         assert!(grep("lexer", false).unwrap().contains("ses_aaa")); // case-insensitive
         assert!(grep("nothing like this", false).unwrap().is_empty());
         assert!(grep("tokeni[sz]er", true).unwrap().contains("ses_aaa"));
@@ -332,7 +349,7 @@ mod tests {
 
         let p2 = fixture(true);
         std::env::set_var("OPENCODE_DB", &p2);
-        let (msgs, _, total) = messages("ses_aaa", 30).unwrap();
+        let (_, msgs, _, total) = messages("ses_aaa", 30).unwrap();
         assert_eq!((total, msgs[0].2.as_str()), (1, "projected question"));
         std::env::remove_var("OPENCODE_DB");
         let _ = std::fs::remove_file(p);

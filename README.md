@@ -16,17 +16,23 @@ An fzf picker for **Claude Code, Codex and OpenCode** sessions: every project's 
 agent-session
 ```
 
+The list has a row per session: when it was created, when the last message was sent, the harness, the folder it ran in, and its name. The name is the one you gave it with `/rename` in Claude Code or OpenCode, else the tool's own title, else your last message. The preview sits under the list at full width. It shows the session's id, folder and resume command, then its first and last few messages, so you can see what it started with and where it ended.
+
 | Key | |
 |---|---|
-| type | fuzzy-filter on age, harness, folder, short id and title |
+| type | fuzzy-filter on created, last message, harness, folder and name |
 | `ctrl-g` | grep mode: every keystroke searches all user and assistant text |
 | `ctrl-o` | folder mode: match the folder column only |
 | `ctrl-f` | back to fuzzy mode |
-| `alt-left` / `alt-right` | move the split between list and preview (remembered between runs) |
+| `<` / `>` | make the preview smaller / bigger (remembered between runs) |
 | `shift-up` / `shift-down` | scroll the preview |
-| `?` / `f1` | show the keys in the preview pane (`?` only while the query is empty; otherwise it types a `?`) |
+| `?` / `f1` | show the keys in the preview pane |
 | `ctrl-y` | copy the session id |
 | `enter` | resume: `cd` to the session's folder, then run its harness's resume command |
+
+`?`, `<` and `>` act only while the query is empty. In a query they are typed like any other character.
+
+`AGENT_SESSION_PREVIEW_MESSAGES` sets how many messages the preview shows from each end (default 6).
 
 Other commands: `agent-session list [--grep Q] [--json]`, `agent-session preview <id>`, `agent-session resume <id-or-prefix>`, `agent-session resume-spec <id>`. `agent-session --help` has the rest.
 
@@ -35,8 +41,8 @@ Other commands: `agent-session list [--grep Q] [--json]`, `agent-session preview
 - **Windows:** fzf is started directly, with no bash script. Its preview and reload commands always go through `cmd.exe`, even under Git Bash, so the quoting always matches. Resume runs `claude` as a child process and ignores Ctrl+C while it waits, since Windows has no `exec`.
 - **Speed:** agent-session is fzf's shell (`--with-shell=agent-session __sh`), so a preview or reload is one process rather than `cmd.exe` plus a process. That saves about 20 ms per cursor move and keystroke. Reloads use `reload-sync`, so the list doesn't blank and redraw on each keystroke. Previews are cached per transcript, append-aware, so a cursor move back onto a 150 MB session takes about 10 ms.
 - **Long sessions are listed.** Upstream reads only the last 64 KiB of each transcript and drops a session when that tail has no user message, which is common after big tool output or images. Here the tail grows until it finds one.
-- **`/rename` titles** (`custom-title`) are used as the label first.
-- Each row shows a short id, `ctrl-y` copies the full id, and the preview shows the exact resume command.
+- **`/rename` names** from Claude Code (`custom-title`) and OpenCode (the session title) are used first.
+- Rows show when a session was created as well as its last message. `ctrl-y` copies the session id, and the preview shows the exact resume command and the session's first messages as well as its last.
 - **Grep ignores `<system-reminder>` blocks**, so CLAUDE.md and memory text copied into every session doesn't match everything. Its text cache is append-aware: a session that grew gets only its new lines read.
 - `resume` and `preview` take a unique id prefix (`agent-session resume 7b6ae3ee`).
 - Left out: upstream's other sources (Pi, Grok, Kiro, Cortex, oh-my-pi) and the TOML config file. Keys come from `--bind-*` flags or `AGENT_SESSION_BIND_*` env vars.
