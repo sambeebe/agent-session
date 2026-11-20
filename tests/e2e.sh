@@ -157,6 +157,34 @@ if out=$("$bin" resume "$OC_GONE" 2>&1); then
 fi
 contains "$out" "gone" "resume: a session whose folder is gone is refused"
 
+# ------------------------------------------------------------------ renaming
+# Claude Code's /rename appends a custom-title row, and keeps re-appending
+# it as the session goes on; the newest one is the name. OpenCode's
+# /rename (or ctrl+r in its session list) sets the session's title. Both
+# are undone afterwards, so the checks below see the original fixtures.
+
+claude_file=$(find "$W/claude/projects" -name "$CLAUDE_ID.jsonl")
+cp -p "$claude_file" "$W/claude-before-rename"
+cp -p "$OPENCODE_DB" "$W/opencode-before-rename"
+"$py" - "$claude_file" "$CLAUDE_ID" "$OPENCODE_DB" "$OC_ID" << 'EOF'
+import json, sqlite3, sys
+path, sid, db, oc_id = sys.argv[1:]
+with open(path, 'a', encoding='utf-8') as f:
+    for name in ('First name', 'Login bug, renamed'):
+        f.write(json.dumps({'type': 'custom-title', 'customTitle': name, 'sessionId': sid}, separators=(',', ':')) + '\n')
+c = sqlite3.connect(db)
+c.execute("UPDATE session SET title = 'WGSL port, renamed' WHERE id = ?", (oc_id,))
+c.commit()
+EOF
+label_of() { "$bin" list --color=never | awk -F '\t' -v id="$1" '$1 == id { print $NF }' | sed 's/ *$//'; }
+equals "$(label_of "$CLAUDE_ID")" "Login bug, renamed" "rename: a Claude Code /rename is the title, the newest one"
+equals "$(label_of "$OC_ID")" "WGSL port, renamed" "rename: an OpenCode /rename is the title"
+equals "$("$bin" list --color=never --grep 'renamed' | cut -f1 | sort | tr '\n' ' ')" "$CLAUDE_ID $OC_ID " \
+  "rename: grep finds sessions by their new names"
+cp -p "$W/claude-before-rename" "$claude_file"
+cp -p "$W/opencode-before-rename" "$OPENCODE_DB"
+equals "$(label_of "$CLAUDE_ID")" "Fix the login redirect" "rename: undone for the checks that follow"
+
 if [ "$windows" = 1 ]; then
   echo
   echo "$checks checks passed (Windows: commands only)"

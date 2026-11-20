@@ -73,7 +73,9 @@ write_jsonl(os.path.join(proj, HOSTILE_ID + '.jsonl'), [
 
 # ---------------------------------------------------------------- Codex
 # One session resumed (the same id in two rollouts), each with the AGENTS.md
-# preamble Codex adds as a user turn, and one wrapped request.
+# preamble Codex adds as a user turn, and one wrapped request. The tests
+# compare whole rows, age included, so the ages sit well clear of an hour
+# step: a slow run must not see "1h ago" turn into "2h ago" midway.
 d = os.path.join(root, 'codex-home', 'sessions', '2026', '11', '15')
 os.makedirs(d, exist_ok=True)
 
@@ -92,7 +94,7 @@ def rollout(name, sid, t0, user_msgs, reply):
 
 rollout(f'rollout-2026-11-15T01-00-00-{CODEX_A}.jsonl', CODEX_A, now_ms - 5 * HOUR,
         ['add retry to the uploader'], 'Added exponential backoff')
-rollout(f'rollout-2026-11-15T02-00-00-{CODEX_A}.jsonl', CODEX_A, now_ms - 2 * HOUR,
+rollout(f'rollout-2026-11-15T02-00-00-{CODEX_A}.jsonl', CODEX_A, now_ms - 90 * MIN,
         ['add retry to the uploader', 'now cap retries at five'], 'Capped at 5 retries')
 rollout(f'rollout-2026-11-15T03-00-00-{CODEX_B}.jsonl', CODEX_B, now_ms - 26 * HOUR,
         ['# Files mentioned by the user:\n\n## My request for Codex:\nwhy is the zebra test flaky'],
