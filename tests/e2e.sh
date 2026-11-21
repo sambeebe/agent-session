@@ -127,12 +127,12 @@ msgs_of() { "$bin" list --color=never | awk -F '\t' -v id="$1" '$1 == id { print
 counts=$(printf '%s\n' "$rows" | awk -F '\t' '{ print $1 "=" $6 + 0 }' | tr '\n' ' ')
 equals "$counts" "$CLAUDE_ID=2 $OC_ID=2 $CODEX_A=3 $CODEX_B=2 $OC_GONE=2 $HOSTILE_ID=2 " \
   "list: message counts (Codex's AGENTS.md turn and tool rows are not messages)"
-equals "$(printf '%s\n' "$rows" | awk -F '\t' -v id="$CLAUDE_ID" '$1 == id { print $6 }')" "    2" "list: counts are right-aligned"
+equals "$(printf '%s\n' "$rows" | awk -F '\t' -v id="$CLAUDE_ID" '$1 == id { print $6 }')" "   2" "list: counts are right-aligned"
 codex_times=$(printf '%s\n' "$rows" | awk -F '\t' -v id="$CODEX_A" '$1 == id { print $4 "|" $5 }' | tr -s ' ')
 equals "$codex_times" "5h ago |1h ago " "list: created (first rollout) and last message columns"
 lacks "$(printf '%s\n' "$rows" | cut -f4-)" "0199aaaa" "list: the session id is not shown"
 names=$("$bin" list --color=never --column-names | head -1 | tr -s ' ')
-equals "$names" "$(printf '\t\t\tcreated \tlast msg \t msgs\tharness \tfolder \tname')" "list --column-names: a header row first"
+equals "$names" "$(printf '\t\t\tcreated \tlast msg\tmsgs\tharness \tfolder \tname')" "list --column-names: a header row first"
 
 grep_ids() { "$bin" list --color=never --grep "$1" | cut -f1 | tr '\n' ' '; }
 equals "$(grep_ids 'duplicate redirect')" "$CLAUDE_ID " "grep: Claude message text"

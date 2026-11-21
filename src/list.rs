@@ -26,10 +26,10 @@ pub struct Options {
     pub delay_ms: u64,
 }
 
-const AGE_W: usize = 10;
-const MSGS_W: usize = 5;
+const AGE_W: usize = 8;
+const MSGS_W: usize = 4;
 const HARNESS_W: usize = 8;
-const DIR_W: usize = 20;
+const DIR_W: usize = 16;
 
 const FOLDER: &str = "\x1b[36m";
 
@@ -44,6 +44,22 @@ fn harness_color(src: Src) -> &'static str {
 /// `text` cut and padded to exactly `w` cells.
 fn fit(text: &str, w: usize) -> String {
     util::pad_right(&util::truncate(text, w), w)
+}
+
+/// "5m ago", "3d ago", or for anything older than a week its date, short
+/// enough for the column: 26-11-01. The columns are kept narrow so the
+/// name still gets room in an 80-column terminal.
+fn age(ms: i64, now: i64) -> String {
+    let rel = util::relative(ms, now);
+    if rel.chars().count() <= AGE_W { rel } else { util::local_fmt(ms, "%y-%m-%d") }
+}
+
+/// A message count in at most four characters: 9999, then 12k.
+fn count(n: usize) -> String {
+    match n {
+        0..=9999 => n.to_string(),
+        _ => format!("{}k", (n / 1000).min(999)),
+    }
 }
 
 /// A row of column names, shaped like a session row (with empty id,
@@ -72,11 +88,9 @@ pub fn load(srcs: &[Src], grep: Option<&str>, regex: bool, exclude: Option<&str>
 
 pub fn format_line(s: &Session, now: i64, color: bool) -> String {
     let src = Src::of(s);
-    let created = fit(&util::relative(s.created_ms, now), AGE_W);
-    let last = fit(&util::relative(s.last_ms, now), AGE_W);
-    // Right-aligned so the digits line up; 99999+ would not fit, and no
-    // session gets near it.
-    let msgs = format!("{:>MSGS_W$}", s.messages.min(99_999));
+    let created = fit(&age(s.created_ms, now), AGE_W);
+    let last = fit(&age(s.last_ms, now), AGE_W);
+    let msgs = format!("{:>MSGS_W$}", count(s.messages));
     let harness = fit(src.name(), HARNESS_W);
     // A folder name comes out of the transcript: a tab in it would shift
     // the row's fields and an escape sequence would reach fzf's --ansi.
@@ -152,4 +166,19 @@ pub fn run(opts: &Options) -> Result<(), String> {
     }
     let _ = w.flush();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{age, count, AGE_W};
+
+    #[test]
+    fn narrow_columns_fit() {
+        assert_eq!((count(0), count(9999), count(12_345), count(5_000_000)), ("0".into(), "9999".into(), "12k".into(), "999k".into()));
+        let now = 1_800_000_000_000;
+        assert_eq!(age(now - 5 * 60_000, now), "5m ago");
+        let old = age(now - 30 * 86_400_000, now);
+        assert_eq!(old.len(), AGE_W);
+        assert!(old.chars().all(|c| c.is_ascii_digit() || c == '-'), "{old}");
+    }
 }
