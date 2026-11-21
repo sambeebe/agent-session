@@ -16,11 +16,11 @@ An fzf picker for **Claude Code, Codex and OpenCode** sessions: every project's 
 agent-session
 ```
 
-The list has a row per session: when it was created, when the last message was sent, the harness, the folder it ran in, and its name. The name is the one you gave it with `/rename` in Claude Code or OpenCode, else the tool's own title, else your last message. The preview sits under the list at full width. It shows the session's id, folder and resume command, then its first and last few messages, so you can see what it started with and where it ended.
+The list has a row per session: when it was created, when the last message was sent, how many messages it has, the harness, the folder it ran in, and its name. The name is the one you gave it with `/rename` in Claude Code or OpenCode, else the tool's own title, else your last message. The preview sits under the list at full width. It shows the session's id, folder and resume command, then its first and last few messages, so you can see what it started with and where it ended.
 
 | Key | |
 |---|---|
-| type | fuzzy-filter on created, last message, harness, folder and name |
+| type | fuzzy-filter on created, last message, message count, harness, folder and name |
 | `ctrl-g` | grep mode: every keystroke searches all user and assistant text |
 | `ctrl-o` | folder mode: match the folder column only |
 | `ctrl-f` | back to fuzzy mode |

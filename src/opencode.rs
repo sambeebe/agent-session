@@ -104,18 +104,63 @@ const SCAN: &str = "SELECT id, title, directory, time_updated, time_created FROM
                     WHERE parent_id IS NULL AND time_archived IS NULL \
                     ORDER BY time_updated DESC, id DESC";
 
-/// Top-level, unarchived sessions (subagent children are left out).
+/// Top-level, unarchived sessions (subagent children are left out), with
+/// their message counts.
 pub fn scan() -> Result<Vec<Session>, String> {
-    let Some(c) = connect()? else { return Ok(Vec::new()) };
+    let Some(db) = db_path() else { return Ok(Vec::new()) };
+    let c = open(&db)?;
     let mut st = c.prepare(SCAN).map_err(|e| format!("opencode: {e}"))?;
     let rows = st
         .query_map([], row)
         .map_err(|e| format!("opencode: {e}"))?;
-    Ok(rows
+    let mut sessions: Vec<Session> = rows
         .flatten()
         .filter(|(id, ..)| !id.contains(['\t', '\n', '\r']))
         .map(session_of)
-        .collect())
+        .collect();
+    count_messages(&c, &db, &mut sessions);
+    Ok(sessions)
+}
+
+const COUNT_CACHE: &str = "counts-opencode.json";
+
+#[derive(serde::Serialize, Deserialize, Default)]
+struct CountCache {
+    db: String,
+    /// Session id -> (its time_updated when counted, message count).
+    counts: std::collections::HashMap<String, (i64, usize)>,
+}
+
+/// Sets each session's message count, as the preview counts them. A count
+/// is kept per session with the session's time_updated, so only sessions
+/// that changed since are counted again.
+fn count_messages(c: &Connection, db: &Path, sessions: &mut [Session]) {
+    let file = util::cache_dir().map(|d| d.join(COUNT_CACHE));
+    let db_key = db.to_string_lossy().to_string();
+    let mut cache: CountCache = file
+        .as_ref()
+        .and_then(|f| std::fs::read(f).ok())
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .filter(|k: &CountCache| k.db == db_key)
+        .unwrap_or(CountCache { db: db_key, ..Default::default() });
+    let mut changed = false;
+    for s in sessions.iter_mut() {
+        match cache.counts.get(&s.id) {
+            Some(&(updated, n)) if updated == s.last_ms => s.messages = n,
+            _ => {
+                s.messages = all_messages(c, &s.id).map(|m| m.len()).unwrap_or(0);
+                cache.counts.insert(s.id.clone(), (s.last_ms, s.messages));
+                changed = true;
+            }
+        }
+    }
+    let live: HashSet<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
+    let before = cache.counts.len();
+    cache.counts.retain(|id, _| live.contains(id.as_str()));
+    changed |= cache.counts.len() != before;
+    if let (true, Some(f), Ok(bytes)) = (changed, &file, serde_json::to_vec(&cache)) {
+        let _ = util::write_atomic(f, &bytes);
+    }
 }
 
 pub fn find(id: &str) -> Result<Session, String> {

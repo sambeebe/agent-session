@@ -139,7 +139,7 @@ pub fn split(delta: &str, query: Option<&str>, keys: &Keys) -> Result<(), String
 pub fn keys_text(keys: &Keys) -> String {
     let Keys { grep, dir, fuzzy, copy, bigger, smaller } = keys;
     let rows = [
-        ("type", "filter: created, last, harness, folder, name (fuzzy)"),
+        ("type", "filter: created, last, msgs, harness, folder, name (fuzzy)"),
         (grep.as_str(), "grep mode: search all message text"),
         (dir.as_str(), "folder mode: match the folder only"),
         (fuzzy.as_str(), "back to fuzzy mode"),
@@ -205,13 +205,13 @@ pub fn fzf_args(exe: &str, keys: &Keys, srcs: &[Src]) -> Vec<String> {
         "--no-tmux".into(),
         "--ansi".into(),
         "--delimiter=\t".into(),
-        // Shown: created, last message, harness, folder, name. Each is padded
+        // Shown: created, last message, messages, harness, folder, name. Each is padded
         // to a fixed width and a tab is one cell, so the columns line up.
         // The first row holds the column names: fzf keeps it as a header,
         // next to the rows whichever way the list is laid out.
-        "--with-nth=4,5,6,7,8".into(),
+        "--with-nth=4,5,6,7,8,9".into(),
         "--header-lines=1".into(),
-        "--nth=1,2,3,4,5".into(),
+        "--nth=1,2,3,4,5,6".into(),
         "--tabstop=1".into(),
         "--no-sort".into(),
         "--no-hscroll".into(),
@@ -226,11 +226,11 @@ pub fn fzf_args(exe: &str, keys: &Keys, srcs: &[Src]) -> Vec<String> {
             reload(&format!("{list} --grep {{q}}"))
         ),
         format!(
-            "--bind={dir}:change-prompt(dir> )+enable-search+change-nth(4)+{}+unbind(change)",
+            "--bind={dir}:change-prompt(dir> )+enable-search+change-nth(5)+{}+unbind(change)",
             reload(&list)
         ),
         format!(
-            "--bind={fuzzy}:change-prompt(> )+enable-search+change-nth(1,2,3,4,5)+{}+unbind(change)",
+            "--bind={fuzzy}:change-prompt(> )+enable-search+change-nth(1,2,3,4,5,6)+{}+unbind(change)",
             reload(&list)
         ),
         format!("--bind={copy}:{}", action("execute-silent", &format!("{me}copy {{1}}"))),

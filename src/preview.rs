@@ -125,42 +125,67 @@ fn scan_from(path: &Path, st: &mut Scanned, kind: FileKind) -> io::Result<()> {
         if line.over {
             continue;
         }
-        if kind == FileKind::Codex {
-            let Ok(s) = std::str::from_utf8(&buf) else { continue };
-            let (ts, msg) = codex::line_message(s);
-            if st.started == 0 && ts > 0 {
-                st.started = ts;
-            }
-            if let Some((role, ms, body)) = msg {
-                st.push(Message { role, ms, body: short_body(&body) });
-            }
-            continue;
+        let (ts, msg) = line_message(&buf, kind);
+        if st.started == 0 && ts > 0 {
+            st.started = ts;
         }
-        let head = String::from_utf8_lossy(&buf[..buf.len().min(400)]);
-        if head.contains("\"tool_result\"") || head.starts_with("{\"type\":\"api-request") {
-            continue; // never has text of its own
+        if let Some((role, ms, body)) = msg {
+            st.push(Message { role, ms, body: short_body(&body) });
         }
-        let Ok(s) = std::str::from_utf8(&buf) else { continue };
-        if !s.contains("\"type\":\"user\"") && !s.contains("\"type\":\"assistant\"") {
-            continue;
-        }
-        let Ok(e) = serde_json::from_str::<Entry>(s.trim()) else { continue };
-        let role = match e.kind.as_deref() {
-            Some(k @ ("user" | "assistant")) => k.to_string(),
-            _ => continue,
-        };
-        let Some(m) = &e.message else { continue };
-        let body = extract_text(&m.content, "\n");
-        if body.trim().is_empty() {
-            continue;
-        }
-        let ms = util::parse_ts_ms(e.timestamp.as_deref().unwrap_or(""));
-        if st.started == 0 && ms > 0 {
-            st.started = ms;
-        }
-        st.push(Message { role, ms, body: short_body(&body) });
     }
     Ok(())
+}
+
+/// One transcript line: a time for "started" (Codex: any row's; Claude:
+/// a message's), and the message it holds when it is a user or assistant
+/// message with text: (role, epoch ms, body).
+fn line_message(buf: &[u8], kind: FileKind) -> (i64, Option<(String, i64, String)>) {
+    let Ok(s) = std::str::from_utf8(buf) else { return (0, None) };
+    if kind == FileKind::Codex {
+        return codex::line_message(s);
+    }
+    let head = &s.as_bytes()[..s.len().min(400)];
+    let head = String::from_utf8_lossy(head);
+    if head.contains("\"tool_result\"") || head.starts_with("{\"type\":\"api-request") {
+        return (0, None); // never has text of its own
+    }
+    if !s.contains("\"type\":\"user\"") && !s.contains("\"type\":\"assistant\"") {
+        return (0, None);
+    }
+    let Ok(e) = serde_json::from_str::<Entry>(s.trim()) else { return (0, None) };
+    let role = match e.kind.as_deref() {
+        Some(k @ ("user" | "assistant")) => k.to_string(),
+        _ => return (0, None),
+    };
+    let Some(m) = &e.message else { return (0, None) };
+    let body = extract_text(&m.content, "\n");
+    if body.trim().is_empty() {
+        return (0, None);
+    }
+    let ms = util::parse_ts_ms(e.timestamp.as_deref().unwrap_or(""));
+    (ms, Some((role, ms, body)))
+}
+
+/// How many user and assistant messages with text a transcript holds from
+/// byte `from` on (the same ones the preview counts), and the offset just
+/// past the last whole line read, where a later count of a grown file
+/// carries on.
+pub fn count_messages(path: &Path, from: u64, kind: FileKind) -> io::Result<(usize, u64)> {
+    let mut f = File::open(path)?;
+    f.seek(SeekFrom::Start(from))?;
+    let mut r = BufReader::with_capacity(1 << 20, f);
+    let (mut buf, mut offset, mut n) = (Vec::new(), from, 0usize);
+    loop {
+        let line = util::read_line_capped(&mut r, &mut buf, LINE_CAP)?;
+        if line.len == 0 || !line.whole {
+            break; // a half-written last line is counted next time
+        }
+        offset += line.len as u64;
+        if !line.over && line_message(&buf, kind).1.is_some() {
+            n += 1;
+        }
+    }
+    Ok((n, offset))
 }
 
 impl Scanned {

@@ -35,7 +35,7 @@ USAGE:
   not set up on this machine simply has no rows.
 
 PICKER KEYS (? or f1 in the picker shows them too):
-  typing      fuzzy-filter created / last message / harness / folder / name
+  typing      fuzzy-filter created / last message / msgs / harness / folder / name
   ctrl-g      grep mode: every keystroke searches all message text
   ctrl-o      folder mode     ctrl-f     back to fuzzy
   <           smaller preview >          bigger preview (remembered)

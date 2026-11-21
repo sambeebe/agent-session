@@ -119,14 +119,20 @@ equals "$n" 6 "list --json parses"
 only=$("$bin" list --color=never --source codex | cut -f3 | sort -u)
 equals "$only" codex "list --source codex"
 
-# Shown columns: created, last message, harness, folder, name; no id.
+# Shown columns: created, last message, messages, harness, folder, name;
+# no id.
 fields=$(printf '%s\n' "$rows" | awk -F '\t' '{ print NF }' | sort -u)
-equals "$fields" 8 "list: id, locator, source, then five shown columns"
+equals "$fields" 9 "list: id, locator, source, then six shown columns"
+msgs_of() { "$bin" list --color=never | awk -F '\t' -v id="$1" '$1 == id { print $6 + 0 }'; }
+counts=$(printf '%s\n' "$rows" | awk -F '\t' '{ print $1 "=" $6 + 0 }' | tr '\n' ' ')
+equals "$counts" "$CLAUDE_ID=2 $OC_ID=2 $CODEX_A=3 $CODEX_B=2 $OC_GONE=2 $HOSTILE_ID=2 " \
+  "list: message counts (Codex's AGENTS.md turn and tool rows are not messages)"
+equals "$(printf '%s\n' "$rows" | awk -F '\t' -v id="$CLAUDE_ID" '$1 == id { print $6 }')" "    2" "list: counts are right-aligned"
 codex_times=$(printf '%s\n' "$rows" | awk -F '\t' -v id="$CODEX_A" '$1 == id { print $4 "|" $5 }' | tr -s ' ')
 equals "$codex_times" "5h ago |1h ago " "list: created (first rollout) and last message columns"
 lacks "$(printf '%s\n' "$rows" | cut -f4-)" "0199aaaa" "list: the session id is not shown"
 names=$("$bin" list --color=never --column-names | head -1 | tr -s ' ')
-equals "$names" "$(printf '\t\t\tcreated \tlast msg \tharness \tfolder \tname')" "list --column-names: a header row first"
+equals "$names" "$(printf '\t\t\tcreated \tlast msg \t msgs\tharness \tfolder \tname')" "list --column-names: a header row first"
 
 grep_ids() { "$bin" list --color=never --grep "$1" | cut -f1 | tr '\n' ' '; }
 equals "$(grep_ids 'duplicate redirect')" "$CLAUDE_ID " "grep: Claude message text"
@@ -198,9 +204,31 @@ equals "$(label_of "$CLAUDE_ID")" "Login bug, renamed" "rename: a Claude Code /r
 equals "$(label_of "$OC_ID")" "WGSL port, renamed" "rename: an OpenCode /rename is the title"
 equals "$("$bin" list --color=never --grep 'renamed' | cut -f1 | sort | tr '\n' ' ')" "$CLAUDE_ID $OC_ID " \
   "rename: grep finds sessions by their new names"
+
+# Message counts follow a session as it grows. A Claude transcript that
+# grew is counted on from where the cached count stopped: the title rows
+# added above are not messages, a new message is.
+equals "$(msgs_of "$CLAUDE_ID")" 2 "counts: rows that are not messages leave the count alone"
+"$py" - "$claude_file" "$OPENCODE_DB" "$OC_ID" << 'EOF'
+import json, sqlite3, sys, time
+path, db, oc_id = sys.argv[1:]
+now = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+with open(path, 'a', encoding='utf-8') as f:
+    f.write(json.dumps({'type': 'user', 'timestamp': now, 'message': {'role': 'user', 'content': 'one more thing'}}, separators=(',', ':')) + '\n')
+c = sqlite3.connect(db)
+ms = int(time.time() * 1000)
+c.execute("INSERT INTO message VALUES ('m3', ?, ?, ?)", (oc_id, ms, json.dumps({'role': 'user', 'time': {'created': ms}})))
+c.execute("INSERT INTO part VALUES ('p3', 'm3', ?, ?)", (oc_id, json.dumps({'type': 'text', 'text': 'and the tonemap pass'})))
+c.execute("UPDATE session SET time_updated = ? WHERE id = ?", (ms, oc_id))
+c.commit()
+EOF
+equals "$(msgs_of "$CLAUDE_ID")" 3 "counts: a new Claude Code message is counted"
+equals "$(msgs_of "$OC_ID")" 3 "counts: a new OpenCode message is counted"
+
 cp -p "$W/claude-before-rename" "$claude_file"
 cp -p "$W/opencode-before-rename" "$OPENCODE_DB"
 equals "$(label_of "$CLAUDE_ID")" "Fix the login redirect" "rename: undone for the checks that follow"
+equals "$(msgs_of "$CLAUDE_ID") $(msgs_of "$OC_ID")" "2 2" "counts: back to the originals"
 
 if [ "$windows" = 1 ]; then
   echo

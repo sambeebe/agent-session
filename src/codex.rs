@@ -216,7 +216,9 @@ pub fn parse_file(path: &Path) -> io::Result<Option<Session>> {
 /// a new rollout with the same id, and the newest one is the live one. It
 /// was started when its oldest rollout was.
 pub fn scan(paths: &[PathBuf], is_full: bool) -> Vec<Session> {
-    let all = session::scan_with(paths, is_full, SCAN_CACHE, parse_file);
+    let all = session::scan_with(paths, is_full, SCAN_CACHE, parse_file, |p, from| {
+        crate::preview::count_messages(p, from, crate::grep::FileKind::Codex)
+    });
     let mut started: HashMap<String, i64> = HashMap::new();
     for s in &all {
         let first = started.entry(s.id.clone()).or_insert(s.created_ms);

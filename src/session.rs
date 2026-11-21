@@ -27,6 +27,9 @@ pub struct Session {
     /// When the session was started (its first message), epoch ms.
     #[serde(default)]
     pub created_ms: i64,
+    /// User and assistant messages with text, as the preview counts them.
+    #[serde(default)]
+    pub messages: usize,
     #[serde(default)]
     pub cwd_exists: bool,
     /// No cwd recorded and the directory-name fallback did not exist:
@@ -403,7 +406,7 @@ pub fn parse_session(path: &Path, first: u64) -> io::Result<Option<Session>> {
 
 // ---------------------------------------------------------------- scanning with a cache
 
-const SCAN_CACHE_VERSION: u32 = 4;
+const SCAN_CACHE_VERSION: u32 = 5;
 
 #[derive(Serialize, Deserialize, Default)]
 struct ScanCache {
@@ -416,6 +419,12 @@ struct ScanRecord {
     size: u64,
     mtime_ns: i64,
     session: Option<Session>,
+    /// Messages counted so far, and the byte offset counting reached: a
+    /// file that grew is counted on from there, not read again whole.
+    #[serde(default)]
+    messages: usize,
+    #[serde(default)]
+    counted_to: u64,
 }
 
 fn load_scan_cache(path: Option<&Path>) -> ScanCache {
@@ -429,16 +438,21 @@ fn load_scan_cache(path: Option<&Path>) -> ScanCache {
 /// mtime have not changed) and sorts newest first. `is_full` says `paths`
 /// is every transcript, so cache records for deleted files can go.
 pub fn scan(paths: &[PathBuf], is_full: bool) -> Vec<Session> {
-    scan_with(paths, is_full, CLAUDE_SCAN_CACHE, |p| parse_session(p, TAIL_BYTES))
+    scan_with(paths, is_full, CLAUDE_SCAN_CACHE, |p| parse_session(p, TAIL_BYTES), |p, from| {
+        crate::preview::count_messages(p, from, crate::grep::FileKind::Claude)
+    })
 }
 
 pub const CLAUDE_SCAN_CACHE: &str = "scan-claude.json";
 
-/// `scan` for any file-per-session source: `parse` reads one file, and
-/// `cache_name` keeps each source's records apart (pruning is per source).
-pub fn scan_with<F>(paths: &[PathBuf], is_full: bool, cache_name: &str, parse: F) -> Vec<Session>
+/// `scan` for any file-per-session source: `parse` reads one file, `count`
+/// counts its messages from a byte offset on (returning the count and the
+/// offset it reached), and `cache_name` keeps each source's records apart
+/// (pruning is per source).
+pub fn scan_with<F, C>(paths: &[PathBuf], is_full: bool, cache_name: &str, parse: F, count: C) -> Vec<Session>
 where
     F: Fn(&Path) -> io::Result<Option<Session>> + Sync,
+    C: Fn(&Path, u64) -> io::Result<(usize, u64)> + Sync,
 {
     let cache_path = util::cache_dir().map(|d| d.join(cache_name));
     let mut cache = load_scan_cache(cache_path.as_deref());
@@ -456,17 +470,34 @@ where
     let mut todo = Vec::new();
     for (i, (_, key, size, mt)) in metas.iter().enumerate() {
         match cache.records.get(key) {
-            Some(r) if r.size == *size && r.mtime_ns == *mt => results[i] = r.session.clone(),
+            Some(r) if r.size == *size && r.mtime_ns == *mt => {
+                results[i] = r.session.clone().map(|s| Session { messages: r.messages, ..s })
+            }
             _ => todo.push(i),
         }
     }
-    let parsed = util::parallel_map(&todo, |&i| parse(&metas[i].0));
+    let parsed = util::parallel_map(&todo, |&i| {
+        let (path, key, size, _) = &metas[i];
+        let s = parse(path)?;
+        // Transcripts are appended to: one that grew is counted on from
+        // where the last count stopped. Anything else is counted afresh.
+        let (base, from) = match cache.records.get(key) {
+            Some(r) if r.counted_to > 0 && r.counted_to <= *size && r.size <= *size => (r.messages, r.counted_to),
+            _ => (0, 0),
+        };
+        let (n, to) = match &s {
+            Some(_) => count(path, from).unwrap_or((0, from)),
+            None => (0, from),
+        };
+        Ok::<_, io::Error>((s, base.saturating_add(n), to))
+    });
     for (&i, res) in todo.iter().zip(parsed) {
-        if let Ok(s) = res {
+        if let Ok((s, messages, counted_to)) = res {
             let (_, key, size, mt) = &metas[i];
+            let s = s.map(|s| Session { messages, ..s });
             cache.records.insert(
                 key.clone(),
-                ScanRecord { size: *size, mtime_ns: *mt, session: s.clone() },
+                ScanRecord { size: *size, mtime_ns: *mt, session: s.clone(), messages, counted_to },
             );
             results[i] = s;
             changed = true;
